@@ -11,6 +11,57 @@ import streamlit as st
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT_SECONDS = 10
 
+HYBRID_ROUTES = {
+    "graph_shipment_explanation",
+    "graph_peer_shipments",
+    "graph_exception_precedents",
+    "graph_sop_explanation",
+}
+
+# User facing labels for API field names shown in the hybrid response sections
+# (shipment, carrier, route, exception, and event tables). Any field not
+# listed here falls back to a generated label; see field_label().
+FIELD_LABELS: dict[str, str] = {
+    "carrier_id": "Carrier ID",
+    "carrier_name": "Carrier",
+    "carrier_type": "Carrier Type",
+    "on_time_rate": "On Time Rate",
+    "risk_score": "Carrier Risk Score",
+    "route_id": "Route ID",
+    "origin_city": "Origin City",
+    "origin_state": "Origin State",
+    "destination_city": "Destination City",
+    "destination_state": "Destination State",
+    "historical_delay_rate": "Historical Delay Rate",
+    "shipment_id": "Shipment ID",
+    "shipment_status": "Status",
+    "shipment_mode": "Transport Mode",
+    "planned_delivery_date": "Planned Delivery",
+    "actual_delivery_date": "Actual Delivery",
+    "ship_date": "Ship Date",
+    "delay_days": "Delay Days",
+    "is_delayed": "Delayed",
+    "exception_flag": "Has Exception",
+    "customer_id": "Customer ID",
+    "customer_name": "Customer",
+    "customer_tier": "Customer Tier",
+    "exception_id": "Exception ID",
+    "exception_type": "Exception Type",
+    "severity": "Severity",
+    "resolution_status": "Resolution Status",
+    "detected_at": "Detected At",
+    "event_id": "Event ID",
+    "event_type": "Event Type",
+    "event_city": "Event City",
+    "event_state": "Event State",
+    "event_timestamp": "Event Timestamp",
+}
+
+
+def field_label(key: str) -> str:
+    """Return the user facing label for a known API field, or a generated fallback."""
+    return FIELD_LABELS.get(key, str(key).replace("_", " ").title())
+
 
 def call_api(path: str, params: dict[str, Any] | None = None) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None, int | None]:
     try:
@@ -58,6 +109,118 @@ def call_api_post(path: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | 
         return response.json(), None, response.status_code
     except ValueError:
         return None, "Backend returned a non-JSON response.", response.status_code
+
+
+def _field_value_rows(record: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Turn a flat dict into labeled Field/Value rows for a small reference table."""
+    if not record:
+        return []
+    return [
+        {"Field": field_label(key), "Value": str(value)} for key, value in record.items()
+    ]
+
+
+def _rename_to_labels(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rename a table's columns to their user facing labels."""
+    if frame.empty:
+        return frame
+    return frame.rename(columns={column: field_label(column) for column in frame.columns})
+
+
+SHIPMENT_SUMMARY_FIELDS = [
+    "shipment_id",
+    "customer_name",
+    "customer_tier",
+    "planned_delivery_date",
+    "actual_delivery_date",
+]
+
+
+def shipment_summary_rows(shipment: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Return the shipment facts worth showing beyond the headline metrics."""
+    if not shipment:
+        return []
+    return [
+        {"Field": field_label(key), "Value": str(shipment.get(key, ""))}
+        for key in SHIPMENT_SUMMARY_FIELDS
+    ]
+
+
+def carrier_context_rows(
+    shipment: dict[str, Any] | None, graph_context: dict[str, Any] | None
+) -> list[dict[str, str]]:
+    """Return carrier reference rows, preferring graph context over the shipment record."""
+    carrier = graph_context.get("carrier") if graph_context else None
+    if carrier:
+        return _field_value_rows(carrier)
+    if shipment:
+        return [
+            {"Field": field_label("carrier_name"), "Value": str(shipment.get("carrier_name", ""))},
+            {"Field": field_label("carrier_type"), "Value": str(shipment.get("carrier_type", ""))},
+        ]
+    return []
+
+
+def route_context_rows(
+    shipment: dict[str, Any] | None, graph_context: dict[str, Any] | None
+) -> list[dict[str, str]]:
+    """Return route reference rows, preferring graph context over the shipment record."""
+    route = graph_context.get("route") if graph_context else None
+    if route:
+        return _field_value_rows(route)
+    if shipment:
+        origin = f"{shipment.get('origin_city', '')}, {shipment.get('origin_state', '')}"
+        destination = f"{shipment.get('destination_city', '')}, {shipment.get('destination_state', '')}"
+        return [
+            {"Field": "Origin", "Value": origin},
+            {"Field": "Destination", "Value": destination},
+        ]
+    return []
+
+
+def exception_detail_rows(graph_context: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Return exception reference rows, or an empty list when there is no exception."""
+    if not graph_context:
+        return []
+    return _field_value_rows(graph_context.get("exception"))
+
+
+def events_dataframe(graph_context: dict[str, Any] | None) -> pd.DataFrame:
+    """Return the ordered event table for a shipment, or an empty frame."""
+    if not graph_context:
+        return pd.DataFrame()
+    events = graph_context.get("events") or []
+    if not events:
+        return pd.DataFrame()
+    frame = pd.DataFrame(events)
+    preferred_columns = ["event_timestamp", "event_type", "event_city", "event_state"]
+    ordered_columns = [column for column in preferred_columns if column in frame.columns]
+    remaining_columns = [column for column in frame.columns if column not in ordered_columns]
+    frame = frame[ordered_columns + remaining_columns]
+    return _rename_to_labels(frame)
+
+
+def records_dataframe(records: list[dict[str, Any]] | None) -> pd.DataFrame:
+    """Return a labeled table for a list of records (peer shipments or precedents)."""
+    if not records:
+        return pd.DataFrame()
+    return _rename_to_labels(pd.DataFrame(records))
+
+
+def sop_guidance_text(sop_guidance: dict[str, Any] | None) -> tuple[str, list[str]]:
+    """Return (answer, sources) for the SOP guidance section, or ("", []) when unavailable."""
+    if not sop_guidance:
+        return "", []
+    answer = str(sop_guidance.get("answer", "")).strip()
+    sources = list(sop_guidance.get("sources") or [])
+    return answer, sources
+
+
+def retrieval_sources_label(retrieval_sources: list[str] | None) -> str:
+    """Return a readable label listing which backends contributed to a response."""
+    if not retrieval_sources:
+        return "No retrieval sources reported."
+    return ", ".join(retrieval_sources)
 
 
 def render_home() -> None:
@@ -231,6 +394,96 @@ def render_sop_assistant() -> None:
         st.write("No sources returned.")
 
 
+def render_hybrid_response(result: dict[str, Any]) -> None:
+    """Render a graph backed assistant response in clear, structured sections."""
+    data = result.get("data")
+    if not isinstance(data, dict):
+        st.error("Unexpected response format.")
+        return
+
+    shipment = data.get("shipment")
+    graph_context = data.get("graph_context")
+
+    st.subheader("Shipment Summary")
+    if shipment:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric(field_label("shipment_status"), str(shipment.get("shipment_status", "")))
+        col2.metric(field_label("shipment_mode"), str(shipment.get("shipment_mode", "")))
+        col3.metric(field_label("is_delayed"), "Yes" if shipment.get("is_delayed") else "No")
+        col4.metric(field_label("delay_days"), int(shipment.get("delay_days", 0)))
+        st.dataframe(
+            pd.DataFrame(shipment_summary_rows(shipment)), width="stretch", hide_index=True
+        )
+    else:
+        st.info("No shipment data returned.")
+
+    st.subheader("Carrier and Route Context")
+    if graph_context is None and shipment:
+        st.info(
+            "Detailed graph context is currently unavailable. Showing carrier and "
+            "route facts from the shipment record instead."
+        )
+    carrier_col, route_col = st.columns(2)
+    with carrier_col:
+        st.write("**Carrier**")
+        carrier_rows = carrier_context_rows(shipment, graph_context)
+        if carrier_rows:
+            st.dataframe(pd.DataFrame(carrier_rows), width="stretch", hide_index=True)
+        else:
+            st.info("No carrier data available.")
+    with route_col:
+        st.write("**Route**")
+        route_rows = route_context_rows(shipment, graph_context)
+        if route_rows:
+            st.dataframe(pd.DataFrame(route_rows), width="stretch", hide_index=True)
+        else:
+            st.info("No route data available.")
+
+    st.subheader("Ordered Shipment Events")
+    events_df = events_dataframe(graph_context)
+    if events_df.empty:
+        st.info("No event data available.")
+    else:
+        st.dataframe(events_df, width="stretch", hide_index=True)
+
+    st.subheader("Exception Details")
+    exception_rows = exception_detail_rows(graph_context)
+    if exception_rows:
+        st.dataframe(pd.DataFrame(exception_rows), width="stretch", hide_index=True)
+    elif graph_context is None:
+        st.info("Exception details are currently unavailable.")
+    else:
+        st.info("No exception recorded for this shipment.")
+
+    st.subheader("Similar Shipments")
+    peers_df = records_dataframe(data.get("peers"))
+    if peers_df.empty:
+        st.info("No similar shipments found.")
+    else:
+        st.dataframe(peers_df, width="stretch", hide_index=True)
+
+    st.subheader("Previous Exception Outcomes")
+    precedents_df = records_dataframe(data.get("precedents"))
+    if precedents_df.empty:
+        st.info("No previous exception outcomes found.")
+    else:
+        st.dataframe(precedents_df, width="stretch", hide_index=True)
+
+    st.subheader("SOP Guidance")
+    sop_answer, sop_sources = sop_guidance_text(data.get("sop_guidance"))
+    if sop_answer:
+        st.write(sop_answer)
+        if sop_sources:
+            st.write("**Sources**")
+            for source in sop_sources:
+                st.write(f"- {source}")
+    else:
+        st.info("No SOP guidance returned for this question.")
+
+    st.subheader("Retrieval Sources")
+    st.write(retrieval_sources_label(result.get("retrieval_sources")))
+
+
 def render_assistant_chat() -> None:
     st.header("Assistant Chat")
     question = st.text_input(
@@ -254,14 +507,19 @@ def render_assistant_chat() -> None:
 
     route = str(result.get("route", "unknown"))
     answer = str(result.get("answer", "")).strip()
-    data = result.get("data")
-    sources = result.get("sources", [])
 
     st.subheader("Route")
     st.code(route)
 
     st.subheader("Answer")
     st.write(answer if answer else "No answer returned.")
+
+    if route in HYBRID_ROUTES:
+        render_hybrid_response(result)
+        return
+
+    data = result.get("data")
+    sources = result.get("sources", [])
 
     st.subheader("Data")
     if isinstance(data, list):
