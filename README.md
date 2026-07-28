@@ -54,7 +54,46 @@ pip install -r requirements.txt
 
 No environment variables are required for local use (see `.env.example`).
 
-## Running the application
+## Running with Docker
+
+The complete application (FastAPI, Streamlit, and Neo4j) can run with one
+command. Copy `.env.example` to `.env` first and set a real password for
+`NEO4J_PASSWORD`.
+
+Start everything:
+
+```bash
+docker compose up --build
+```
+
+This starts Neo4j, waits for it to become healthy, then runs a one time
+setup step that generates synthetic data, builds the DuckDB database,
+ingests the SOP documents into Chroma, and loads the Neo4j graph, before
+starting the API and the Streamlit UI.
+
+Verify it is running:
+
+```bash
+docker compose ps
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/graph
+curl -I http://127.0.0.1:8501
+```
+
+The API is on `http://127.0.0.1:8000` and the Streamlit UI is on
+`http://127.0.0.1:8501`.
+
+Stop everything:
+
+```bash
+docker compose down
+```
+
+This stops and removes the containers but keeps the named volumes, so the
+generated data, Chroma store, and Neo4j graph are still there the next time
+you run `docker compose up --build`.
+
+## Running locally with Python
 
 Run these steps in order from the project root, with the virtual environment
 activated.

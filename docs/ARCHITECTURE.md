@@ -31,9 +31,12 @@ delegating to a service module.
 
 An interface with several pages (Home, Shipment Lookup, Shipment Events,
 Delay Analytics, High Risk Shipments, SOP Assistant, Assistant Chat) that
-calls the local FastAPI backend over HTTP using the `requests` library. It
+calls the FastAPI backend over HTTP using the `requests` library. It
 performs no data access or business logic of its own; all data comes from
-the API.
+the API. The backend base URL comes from the `API_BASE_URL` environment
+variable, defaulting to `http://127.0.0.1:8000` for local Python use; the
+`ui` container overrides it to `http://api:8000`, the API's service name on
+the Compose network.
 
 ### DuckDB operational database (`app/db`, `data/processed/logistics.duckdb`)
 
@@ -258,6 +261,43 @@ on the same instance, is what keeps test data apart from development data.
 Tests skip clearly, with a message naming the unreachable URL, when
 `neo4j-test` is not running.
 
+### Application containers (`Dockerfile`, `docker-compose.yml`)
+
+A single `Dockerfile` (Python 3.11, a nonroot `appuser`) builds one image,
+`freight-visibility-app`, used by both the `api` and `ui` services; only
+the Compose `command` differs between them. Local generated data, `.env`,
+caches, and Git files are excluded through `.dockerignore`, so the image
+only ever contains the application code and the sample SOP documents.
+
+`docker-compose.yml` defines, in addition to `neo4j` and `neo4j-test`:
+
+- `init` — runs once: generates synthetic data, builds the DuckDB
+  database, ingests the SOP documents into Chroma, and loads the Neo4j
+  graph, in that order. It waits for `neo4j`'s healthcheck before starting.
+  `api` waits for `init` to exit successfully before it starts, so the API
+  never starts against a missing database.
+- `api` — the FastAPI service, with `NEO4J_URI` set to `bolt://neo4j:7687`
+  (the service name on the Compose network, not `localhost`). Its
+  healthcheck polls its own `/health` endpoint. Neo4j is only needed for
+  `init`'s graph loading step and for `/health/graph`; the API container
+  itself does not depend on `neo4j` directly and starts normally if Neo4j
+  is ever unavailable at runtime, consistent with the graceful degradation
+  described above.
+- `ui` — the Streamlit interface, with `API_BASE_URL` set to `http://api:8000`
+  so it reaches the API by service name rather than `localhost`. It waits
+  for `api`'s healthcheck before starting. Its own healthcheck polls
+  Streamlit's `/_stcore/health` endpoint.
+
+Two named volumes support this: `app_data` (mounted at
+`/app/data/processed` in `init` and `api`) persists the generated CSVs,
+DuckDB file, and Chroma store across restarts; `hf_cache` (mounted at the
+appuser's Hugging Face cache directory in the same two services) persists
+the downloaded embedding model so it does not need to download again on
+every restart. `neo4j_data` is unchanged from before. `.env` is never copied
+into the image or exposed by any command; `docker compose config --quiet`
+remains the way to validate the file without printing the interpolated
+password.
+
 ### Local environment configuration (`app/core/config.py`)
 
 Connection settings for Neo4j come from environment variables, loaded with
@@ -354,12 +394,15 @@ tests/
 ├── test_graph.py                       graph schema, ingestion, sync, and query tests (isolated Neo4j service)
 ├── test_assistant_graph_routing.py     hybrid route selection, retrieval, and failure behavior
 ├── test_api_graph.py                   hybrid routes through /assistant/chat
+├── test_docker_stack.py                compose config, container health, and cross container connections
 ├── test_config.py                      .env loading behavior
 └── ...                                  data generation, service, routing, and API tests
 
 docs/                             project documentation
 requirements.txt                  pinned Python dependencies
-docker-compose.yml                defines the local and test Neo4j Community Edition services
+Dockerfile                        one image, used by both the api and ui services
+.dockerignore                     excludes generated data, .env, caches, and Git files from the image
+docker-compose.yml                defines neo4j, neo4j-test, init, api, and ui
 ```
 
 ## Validation Commands

@@ -1,3 +1,9 @@
+x-app-image: &app-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: freight-visibility-app:latest
+
 services:
   neo4j:
     image: neo4j:5.26.0-community
@@ -6,9 +12,24 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
+      # Only NEO4J_AUTH is passed through; the official image turns any other
+      # NEO4J_* variable into a server config setting, which fails startup for
+      # names (like NEO4J_PASSWORD) that are not real config keys. The
+      # healthcheck below reads the username and password back out of
+      # NEO4J_AUTH instead of needing separate variables.
       NEO4J_AUTH: "${NEO4J_USER}/${NEO4J_PASSWORD}"
     volumes:
       - neo4j_data:/data
+    healthcheck:
+      # cypher-shell is a JVM tool: each invocation can take several seconds
+      # to start even on a fast host, and longer under load or on a slower
+      # host. timeout and start_period are generous so a slow check or a slow
+      # first boot is not mistaken for a failure.
+      test: ["CMD-SHELL", "cypher-shell -u \"$${NEO4J_AUTH%%/*}\" -p \"$${NEO4J_AUTH#*/}\" 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 20s
+      retries: 10
+      start_period: 60s
 
   # Used only for graph integration tests. No named volume, so /data lives in
   # the container's own writable layer and is discarded when the container is
@@ -24,6 +45,84 @@ services:
       - "17687:7687"
     environment:
       NEO4J_AUTH: "${NEO4J_USER}/${NEO4J_PASSWORD}"
+    healthcheck:
+      # cypher-shell is a JVM tool: each invocation can take several seconds
+      # to start even on a fast host, and longer under load or on a slower
+      # host. timeout and start_period are generous so a slow check or a slow
+      # first boot is not mistaken for a failure.
+      test: ["CMD-SHELL", "cypher-shell -u \"$${NEO4J_AUTH%%/*}\" -p \"$${NEO4J_AUTH#*/}\" 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 20s
+      retries: 10
+      start_period: 60s
+
+  # Runs once: generates synthetic data, builds the DuckDB database, ingests
+  # SOP documents into Chroma, and loads the Neo4j graph. api waits for this
+  # to finish successfully before it starts.
+  init:
+    <<: *app-image
+    container_name: freight-visibility-init
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: "${NEO4J_USER}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
+    volumes:
+      - app_data:/app/data/processed
+      - hf_cache:/home/appuser/.cache/huggingface
+    command:
+      - sh
+      - -c
+      - >-
+        python -m app.data.generate_synthetic_data &&
+        python -m app.data.load_data &&
+        python -m app.rag.ingest_docs &&
+        python -m app.graph.load_graph
+
+  api:
+    <<: *app-image
+    container_name: freight-visibility-api
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: "${NEO4J_USER}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
+    volumes:
+      - app_data:/app/data/processed
+      - hf_cache:/home/appuser/.cache/huggingface
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  ui:
+    <<: *app-image
+    container_name: freight-visibility-ui
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "app/ui/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
 volumes:
   neo4j_data:
+  app_data:
+  hf_cache:
