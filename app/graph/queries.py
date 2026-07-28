@@ -341,3 +341,68 @@ def get_shipment_context(session: Session, shipment_id: str) -> dict[str, Any] |
             _strip_internal_properties(dict(event)) for event in record["events"] if event is not None
         ],
     }
+
+
+def get_peer_shipments_by_carrier_and_route(
+    session: Session, shipment_id: str, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Return other shipments sharing the same carrier and route as shipment_id.
+
+    Excludes the source shipment. Returns an empty list when the shipment does
+    not exist or has no matching peers.
+    """
+    result = session.run(
+        """
+        MATCH (s:Shipment {shipment_id: $shipment_id})-[:SHIPPED_BY]->(carrier:Carrier)
+        MATCH (s)-[:USES_ROUTE]->(route:Route)
+        MATCH (peer:Shipment)-[:SHIPPED_BY]->(carrier)
+        MATCH (peer)-[:USES_ROUTE]->(route)
+        WHERE peer.shipment_id <> $shipment_id
+        OPTIONAL MATCH (peer)-[:HAS_EXCEPTION]->(exception:Exception)
+        RETURN peer.shipment_id AS shipment_id,
+               peer.shipment_status AS shipment_status,
+               peer.is_delayed AS is_delayed,
+               peer.delay_days AS delay_days,
+               peer.exception_flag AS exception_flag,
+               exception.exception_type AS exception_type
+        ORDER BY peer.is_delayed DESC, peer.delay_days DESC, peer.shipment_id
+        LIMIT $limit
+        """,
+        shipment_id=shipment_id,
+        limit=limit,
+    )
+    return result.data()
+
+
+def get_exception_precedents(
+    session: Session, shipment_id: str, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Return other shipments with the same exception type on the same carrier or route.
+
+    Excludes the source shipment. Returns an empty list when the shipment does
+    not exist, has no exception, or has no matching precedent.
+    """
+    result = session.run(
+        """
+        MATCH (s:Shipment {shipment_id: $shipment_id})-[:HAS_EXCEPTION]->(current:Exception)
+        MATCH (s)-[:SHIPPED_BY]->(carrier:Carrier)
+        MATCH (s)-[:USES_ROUTE]->(route:Route)
+        MATCH (precedent:Shipment)-[:HAS_EXCEPTION]->(pastException:Exception)
+        WHERE pastException.exception_type = current.exception_type
+          AND precedent.shipment_id <> $shipment_id
+          AND (
+            (precedent)-[:SHIPPED_BY]->(carrier)
+            OR (precedent)-[:USES_ROUTE]->(route)
+          )
+        RETURN precedent.shipment_id AS shipment_id,
+               pastException.exception_type AS exception_type,
+               pastException.severity AS severity,
+               pastException.resolution_status AS resolution_status,
+               pastException.detected_at AS detected_at
+        ORDER BY pastException.detected_at DESC
+        LIMIT $limit
+        """,
+        shipment_id=shipment_id,
+        limit=limit,
+    )
+    return result.data()

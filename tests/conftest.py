@@ -7,8 +7,10 @@ import pytest
 
 import app.data.generate_synthetic_data as data_gen
 import app.data.load_data as data_load
+import app.db.connection as db_connection
 import app.graph.connection as graph_connection
 from app.graph.connection import close_driver, graph_health_check
+from app.graph.load_graph import run_ingestion
 
 
 # Isolated Neo4j instance for tests only, started with:
@@ -88,3 +90,24 @@ def require_neo4j(use_test_graph: None) -> None:
 def _close_graph_driver_at_session_end() -> Iterator[None]:
     yield
     close_driver()
+
+
+@pytest.fixture(scope="module")
+def use_test_database_module(test_database_path: Path) -> Iterator[None]:
+    """Point app.db.connection at the isolated synthetic dataset for the whole module.
+
+    A module scoped fixture cannot depend on the function scoped monkeypatch
+    fixture used elsewhere, so the swap is done manually here instead.
+    """
+    original_path = db_connection.DATABASE_PATH
+    db_connection.DATABASE_PATH = test_database_path
+    try:
+        yield
+    finally:
+        db_connection.DATABASE_PATH = original_path
+
+
+@pytest.fixture(scope="module")
+def ingested_graph(use_test_database_module: None) -> dict[str, int]:
+    """Ingest the isolated synthetic dataset into the test graph once for the module."""
+    return run_ingestion()

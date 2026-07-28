@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import duckdb
 import pytest
 
-import app.db.connection as db_connection
 from app.graph import queries
 from app.graph.connection import get_session
 from app.graph.load_graph import run_ingestion
@@ -48,27 +46,6 @@ EXPECTED_RELATIONSHIP_COUNTS = {
     "HAS_EVENT": 5_000,
     "HAS_EXCEPTION": 180,
 }
-
-
-@pytest.fixture(scope="module")
-def use_test_database_module(test_database_path: Path) -> Iterator[None]:
-    """Point app.db.connection at the isolated synthetic dataset for the whole module.
-
-    A module scoped fixture cannot depend on the function scoped monkeypatch
-    fixture used elsewhere, so the swap is done manually here instead.
-    """
-    original_path = db_connection.DATABASE_PATH
-    db_connection.DATABASE_PATH = test_database_path
-    try:
-        yield
-    finally:
-        db_connection.DATABASE_PATH = original_path
-
-
-@pytest.fixture(scope="module")
-def ingested_graph(use_test_database_module: None) -> dict[str, int]:
-    """Ingest the isolated synthetic dataset into the test graph once for the module."""
-    return run_ingestion()
 
 
 def test_schema_creation_succeeds() -> None:

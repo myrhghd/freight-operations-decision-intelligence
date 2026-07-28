@@ -67,11 +67,15 @@ version control and is rebuilt using the loader script.
 ### Deterministic assistant routing (`app/services/assistant_service.py`)
 
 Given a natural language question, `route_question` uses a shipment ID
-pattern and keyword matching to classify the question into one of: shipment
-lookup, shipment events, delay analytics, high risk shipments, or SOP
-search. `build_chat_response` then calls the corresponding service function
-and returns its result along with the chosen route. Routing is rule based
-and produces the same result for the same input every time.
+pattern and keyword matching to classify the question into one of nine
+routes: shipment lookup, shipment events, delay analytics, high risk
+shipments, one of four graph routes described below, or SOP search.
+`build_chat_response` then calls the corresponding service function and
+returns its result along with the chosen route. Routing is rule based and
+produces the same result for the same input every time. New keyword lists
+are checked after the existing shipment lookup and shipment events terms
+and before delay analytics and high risk terms, so no existing question
+phrasing changes route.
 
 ### Shipment lookup and analytics services (`app/services/shipment_service.py`)
 
@@ -102,8 +106,10 @@ several SQL joins.
   and applies them through statements that use `IF NOT EXISTS`, so running
   schema setup again has no effect beyond the first run.
 - `queries.py` contains the parameterized, batched Cypher statements used
-  for ingestion, node and relationship count helpers, and the connected
-  shipment context query.
+  for ingestion, node and relationship count helpers, the connected
+  shipment context query, a peer shipment query (other shipments sharing
+  the same carrier and route), and an exception precedent query (other
+  shipments with the same exception type on the same carrier or route).
 - `load_graph.py` reads the current DuckDB tables directly (through
   `app/db/connection.py`), validates that every foreign key in the tables
   resolves, applies the schema, and ingests carriers, customers, routes,
@@ -155,8 +161,72 @@ Relationships, each directed from the shipment outward:
 ```
 
 No SOP nodes or inferred relationships exist in the graph. SOP retrieval
-remains entirely inside Chroma, and the assistant router has not been
-connected to the graph.
+remains entirely inside Chroma; the assistant router uses the graph for
+relationship context and, for one route, passes a confirmed exception type
+into the existing Chroma retriever, described in the next section.
+
+### Hybrid retrieval routes (`app/services/graph_service.py`, `app/services/assistant_service.py`)
+
+`app/services/graph_service.py` wraps the three Neo4j read operations the
+assistant uses: `get_shipment_graph_context`, `get_peer_shipments`, and
+`get_exception_precedents`. Each function returns a `(result, error)` pair
+rather than raising: `error` is `None` whenever Neo4j was reached
+successfully, even when the result is empty; `error` is a fixed message
+when the connection or query fails, so a route can degrade instead of
+returning an HTTP 500.
+
+`assistant_service.py` adds four routes on top of the five described
+above, all requiring a shipment ID in the question:
+
+- `graph_shipment_explanation` — DuckDB confirms the shipment, then Neo4j's
+  connected shipment context supplies its carrier, customer, route,
+  ordered events, and exception for the answer.
+- `graph_peer_shipments` — DuckDB confirms the shipment, then Neo4j returns
+  other shipments sharing the same carrier and route.
+- `graph_exception_precedents` — DuckDB confirms the shipment and checks
+  its exception flag; only when an exception is present does Neo4j look up
+  prior shipments with the same exception type on the same carrier or
+  route.
+- `graph_sop_explanation` — DuckDB confirms the shipment, Neo4j confirms
+  its exception type; only when an exception is present is that type
+  passed as the question to the existing, unchanged `retrieve_sop_chunks`
+  and `extractive_answer_from_chunks` Chroma pipeline.
+
+Every graph route checks DuckDB first; Neo4j and Chroma are never called
+for a shipment ID that does not exist. All four share one response shape:
+
+```json
+{
+  "question": "...",
+  "route": "...",
+  "answer": "...",
+  "data": {
+    "shipment": {},
+    "graph_context": {},
+    "peers": [],
+    "precedents": [],
+    "sop_guidance": null
+  },
+  "sources": [],
+  "retrieval_sources": []
+}
+```
+
+`retrieval_sources` lists only the backends that were actually reached for
+that response (`duckdb`, `neo4j`, `chroma`), so a degraded answer is
+identifiable from the response itself rather than only from its text.
+Fields in `data` that a given route does not use keep their default value
+(`null` for `graph_context`/`sop_guidance`, an empty list for
+`peers`/`precedents`). The five original routes keep their original flat
+`data` shape and do not include `retrieval_sources`; nothing about their
+behavior or response changed.
+
+When a graph or Chroma call fails, the affected route still returns a 200
+response: the answer explains what is unavailable, the corresponding
+`data` field stays at its default, and that backend is left out of
+`retrieval_sources`. An unsupported question, and a question with keywords
+but no shipment ID, both fall through to the existing `sop_search` branch
+exactly as before.
 
 ### Isolated Neo4j test service
 
@@ -239,6 +309,11 @@ logistics.duckdb --> load_graph.py --> Neo4j (local, docker compose)
                                                   |
                                                   v
                                        app/graph/connection.py <-- /health/graph
+
+FastAPI /assistant/chat --> assistant_service.build_chat_response
+        |                              |                    |
+        v                              v                    v
+  shipment_service (DuckDB)   graph_service (Neo4j)   retriever (Chroma, graph_sop_explanation only)
 ```
 
 ## Repository Structure
@@ -258,13 +333,14 @@ app/
 ├── graph/
 │   ├── connection.py             Neo4j driver, session, cleanup, health check
 │   ├── schema.py                 idempotent constraints and indexes
-│   ├── queries.py                batched Cypher for ingestion, sync cleanup, and the connected shipment query
+│   ├── queries.py                batched Cypher for ingestion, sync cleanup, connected shipment, peer, and precedent queries
 │   └── load_graph.py             synchronized ingestion from DuckDB into Neo4j
 ├── rag/
 │   ├── ingest_docs.py           SOP chunking, embedding, Chroma ingestion
 │   └── retriever.py             embedding based retrieval and extractive answer
 ├── services/
-│   ├── assistant_service.py     deterministic question routing
+│   ├── assistant_service.py     deterministic question routing across nine routes
+│   ├── graph_service.py         safe Neo4j wrappers returning (result, error) pairs
 │   └── shipment_service.py      shipment and analytics SQL queries
 └── ui/
     └── streamlit_app.py          Streamlit interface
@@ -275,9 +351,11 @@ data/
 └── sample_sops/                 sample SOP and FAQ markdown documents
 
 tests/
-├── test_graph.py                  graph schema, ingestion, sync, and query tests (isolated Neo4j service)
-├── test_config.py                 .env loading behavior
-└── ...                             data generation, service, routing, and API tests
+├── test_graph.py                       graph schema, ingestion, sync, and query tests (isolated Neo4j service)
+├── test_assistant_graph_routing.py     hybrid route selection, retrieval, and failure behavior
+├── test_api_graph.py                   hybrid routes through /assistant/chat
+├── test_config.py                      .env loading behavior
+└── ...                                  data generation, service, routing, and API tests
 
 docs/                             project documentation
 requirements.txt                  pinned Python dependencies
