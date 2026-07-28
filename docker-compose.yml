@@ -1,0 +1,29 @@
+services:
+  neo4j:
+    image: neo4j:5.26.0-community
+    container_name: freight-visibility-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: "${NEO4J_USER}/${NEO4J_PASSWORD}"
+    volumes:
+      - neo4j_data:/data
+
+  # Used only for graph integration tests. No named volume, so /data lives in
+  # the container's own writable layer and is discarded when the container is
+  # removed. Behind the "test" profile so a plain `docker compose up` never
+  # starts it, keeping the development graph in `neo4j` untouched by tests.
+  neo4j-test:
+    image: neo4j:5.26.0-community
+    container_name: freight-visibility-neo4j-test
+    profiles:
+      - test
+    ports:
+      - "17474:7474"
+      - "17687:7687"
+    environment:
+      NEO4J_AUTH: "${NEO4J_USER}/${NEO4J_PASSWORD}"
+
+volumes:
+  neo4j_data:

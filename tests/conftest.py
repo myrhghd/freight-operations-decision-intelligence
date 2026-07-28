@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 import app.data.generate_synthetic_data as data_gen
 import app.data.load_data as data_load
+import app.graph.connection as graph_connection
+from app.graph.connection import close_driver, graph_health_check
+
+
+# Isolated Neo4j instance for tests only, started with:
+#   docker compose --profile test up -d neo4j-test
+# Kept separate from the bolt://localhost:7687 development service so graph
+# tests can never modify development graph data.
+GRAPH_TEST_URI = "bolt://localhost:17687"
 
 
 @pytest.fixture(scope="session")
@@ -45,3 +55,36 @@ def use_test_database(
 ) -> None:
     """Point app.db.connection at the isolated test database for the duration of a test."""
     monkeypatch.setattr("app.db.connection.DATABASE_PATH", test_database_path)
+
+
+@pytest.fixture(scope="session")
+def use_test_graph() -> Iterator[None]:
+    """Point app.graph.connection at the isolated neo4j-test service for the session.
+
+    Any driver already created against the development URI is closed first, so
+    the next get_driver() call is guaranteed to connect to the test service
+    instead. The development URI is restored on teardown for the same reason.
+    """
+    graph_connection.close_driver()
+    original_uri = graph_connection.NEO4J_URI
+    graph_connection.NEO4J_URI = GRAPH_TEST_URI
+    try:
+        yield
+    finally:
+        graph_connection.close_driver()
+        graph_connection.NEO4J_URI = original_uri
+
+
+@pytest.fixture(scope="session")
+def require_neo4j(use_test_graph: None) -> None:
+    """Skip dependent tests clearly when the isolated Neo4j test service is unreachable."""
+    if not graph_health_check():
+        pytest.skip(
+            f"Neo4j test service is not reachable at {GRAPH_TEST_URI}; skipping graph tests."
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _close_graph_driver_at_session_end() -> Iterator[None]:
+    yield
+    close_driver()

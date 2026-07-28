@@ -12,3 +12,5 @@ transformers==4.57.6
 torch==2.2.2
 pytest==9.0.3
 httpx==0.28.1
+neo4j==5.28.0
+python-dotenv==1.2.2
