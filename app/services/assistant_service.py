@@ -37,6 +37,7 @@ def route_question(question: str) -> str:
     graph_precedent_terms = (
         "precedent",
         "seen this exception before",
+        "seen this exceptions before",
         "happened before",
         "same exception type",
         "resolved before",
@@ -401,7 +402,17 @@ def build_chat_response(question: str) -> dict[str, Any]:
             "sources": [],
         }
 
-    chunks = retrieve_sop_chunks(question=question, top_k=3)
+    try:
+        chunks = retrieve_sop_chunks(question=question, top_k=3)
+    except Exception:
+        return {
+            "question": question,
+            "route": route,
+            "answer": "SOP retrieval is currently unavailable.",
+            "data": [],
+            "sources": [],
+        }
+
     sop_result = extractive_answer_from_chunks(question=question, chunks=chunks)
     return {
         "question": question,

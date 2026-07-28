@@ -1,0 +1,380 @@
+[
+  {
+    "category": "shipment_lookup",
+    "question": "What is the status of SHP-1001?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_lookup",
+    "question": "Where is SHP-1021?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_lookup",
+    "question": "Give me the details for SHP-1035",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1035",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_lookup",
+    "question": "what is the status of shp-1021?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_lookup",
+    "question": "What is the status of SHP-9999?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-9999",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_lookup",
+    "question": "What is the status of this shipment?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_events",
+    "question": "Show me the timeline for SHP-1001",
+    "expected_route": "shipment_events",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_events",
+    "question": "What is the event history for SHP-1021?",
+    "expected_route": "shipment_events",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_events",
+    "question": "Show me the timeline for SHP-9999",
+    "expected_route": "shipment_events",
+    "expected_shipment_id": "SHP-9999",
+    "expected_sop_source": null
+  },
+  {
+    "category": "shipment_events",
+    "question": "Show me the timeline for this shipment",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "delay_analytics",
+    "question": "What are the delay rates by carrier and lane?",
+    "expected_route": "delay_analytics",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "delay_analytics",
+    "question": "Show me carrier performance across lanes",
+    "expected_route": "delay_analytics",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "delay_analytics",
+    "question": "Which lanes have the highest delay?",
+    "expected_route": "delay_analytics",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "high_risk_shipments",
+    "question": "Which shipments are high risk right now?",
+    "expected_route": "high_risk_shipments",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "high_risk_shipments",
+    "question": "Show me shipments at risk",
+    "expected_route": "high_risk_shipments",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "high_risk_shipments",
+    "question": "List shipments with exceptions",
+    "expected_route": "high_risk_shipments",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "sop_search",
+    "question": "What is the SOP for customs delay escalation?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": "customs_delay_escalation.md"
+  },
+  {
+    "category": "sop_search",
+    "question": "What is the weather delay policy?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": "weather_delay_policy.md"
+  },
+  {
+    "category": "sop_search",
+    "question": "What is the customer notification policy?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": "customer_notification_policy.md"
+  },
+  {
+    "category": "sop_search",
+    "question": "What is the carrier escalation matrix?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": "carrier_escalation_matrix.md"
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "Why is SHP-1001 delayed?",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "Why is SHP-1021 delayed?",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "Explain the condition of SHP-1070",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-1070",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "What caused the delay for SHP-1039?",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-1039",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "why is shp-1001 delayed?",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "Why is SHP-9999 delayed?",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-9999",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_shipment_explanation",
+    "question": "Why is this shipment delayed?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_peer_shipments",
+    "question": "Which shipments share the same carrier and route as SHP-1001?",
+    "expected_route": "graph_peer_shipments",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_peer_shipments",
+    "question": "Which shipments share the same route as SHP-1021?",
+    "expected_route": "graph_peer_shipments",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_peer_shipments",
+    "question": "Which shipments share the same carrier as SHP-1070?",
+    "expected_route": "graph_peer_shipments",
+    "expected_shipment_id": "SHP-1070",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_peer_shipments",
+    "question": "Which shipments share the same carrier and route as SHP-9999?",
+    "expected_route": "graph_peer_shipments",
+    "expected_shipment_id": "SHP-9999",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_exception_precedents",
+    "question": "Have we seen this exception before for SHP-1021?",
+    "expected_route": "graph_exception_precedents",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_exception_precedents",
+    "question": "Have we seen this exceptions before for SHP-1022?",
+    "expected_route": "graph_exception_precedents",
+    "expected_shipment_id": "SHP-1022",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_exception_precedents",
+    "question": "Has this happened before for SHP-1039?",
+    "expected_route": "graph_exception_precedents",
+    "expected_shipment_id": "SHP-1039",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_exception_precedents",
+    "question": "Have we seen this exception before for SHP-1001?",
+    "expected_route": "graph_exception_precedents",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_exception_precedents",
+    "question": "Have we seen this exception before for SHP-9999?",
+    "expected_route": "graph_exception_precedents",
+    "expected_shipment_id": "SHP-9999",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1035's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1035",
+    "expected_sop_source": "customer_notification_policy.md"
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1022's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1022",
+    "expected_sop_source": "carrier_escalation_matrix.md"
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1075's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1075",
+    "expected_sop_source": "customs_delay_escalation.md"
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1039's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1039",
+    "expected_sop_source": "carrier_escalation_matrix.md"
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1021's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1021",
+    "expected_sop_source": "carrier_escalation_matrix.md"
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1070's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1070",
+    "expected_sop_source": "weather_delay_policy.md"
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-1001's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to SHP-9999's exception?",
+    "expected_route": "graph_sop_explanation",
+    "expected_shipment_id": "SHP-9999",
+    "expected_sop_source": null
+  },
+  {
+    "category": "graph_sop_explanation",
+    "question": "Which operating procedure applies to this exception?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "unsupported",
+    "question": "Tell me a joke about freight.",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "unsupported",
+    "question": "What's the weather like today?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "unsupported",
+    "question": "Do you like pizza?",
+    "expected_route": "sop_search",
+    "expected_shipment_id": null,
+    "expected_sop_source": null
+  },
+  {
+    "category": "collision",
+    "question": "What is the escalation status for SHP-1001?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "collision",
+    "question": "Which policy applies to the events for SHP-1001?",
+    "expected_route": "shipment_events",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "collision",
+    "question": "Why is the delay rate high for SHP-1001?",
+    "expected_route": "graph_shipment_explanation",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "collision",
+    "question": "What is the carrier performance and risk for SHP-1001?",
+    "expected_route": "delay_analytics",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "collision",
+    "question": "What is the status and timeline for SHP-1001?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  },
+  {
+    "category": "collision",
+    "question": "Where is SHP-1001 and why is it delayed?",
+    "expected_route": "shipment_lookup",
+    "expected_shipment_id": "SHP-1001",
+    "expected_sop_source": null
+  }
+]

@@ -117,6 +117,38 @@ The Streamlit app expects the FastAPI service to be running on
 - `POST /assistant/sop-search` (request body: `{"question": "..."}`)
 - `POST /assistant/chat` (request body: `{"question": "..."}`)
 
+## Retrieval evaluation
+
+A labeled question set checks assistant routing and SOP retrieval quality
+against the local database, Neo4j, and Chroma store. Run it with:
+
+```bash
+python evaluation/evaluate.py
+```
+
+It reports:
+
+- Routing accuracy: how often the assistant selects the expected route.
+- Shipment ID extraction accuracy: how often the expected shipment ID is
+  extracted from the question text.
+- SOP source hit rate: for questions with an expected SOP document, how
+  often that document appears in the returned sources.
+- Route confusion counts: for any routing mismatch, the expected route and
+  the route actually chosen.
+- Failed cases: the question, category, and expected versus actual values
+  for anything that did not match.
+
+The script exits with a nonzero status when a result falls below its
+documented threshold. Latest verified run, against the local dev database,
+Neo4j, and Chroma store, over 54 questions:
+
+- Routing accuracy: 100.0% (threshold 95%)
+- Shipment ID extraction accuracy: 100.0% (threshold 95%)
+- SOP source hit rate: 100.0%, 10 questions with an expected source
+  (threshold 85%)
+- Route confusion: none
+- Failed cases: none
+
 ## Current limitations
 
 - All shipment, carrier, customer, and route data is synthetic, generated
