@@ -90,6 +90,12 @@ single API.
 - A DuckDB operational database built from the synthetic data.
 - A Chroma vector store over a fixed set of sample SOP documents.
 - A deterministic assistant router that does not generate text.
+- A Neo4j graph that holds the same shipment, carrier, customer, route,
+  event, and exception data as DuckDB, used for relationship analysis such
+  as connected shipment context, peer shipments on the same carrier and
+  route, and prior shipments with a matching exception.
+- A Docker Compose stack that runs the complete application, including
+  Neo4j, the API, and the interface, from a single command.
 - A Streamlit interface covering shipment lookup, events, analytics, and
   the assistant.
 
@@ -98,10 +104,8 @@ single API.
 - Real or production freight data.
 - Any generative language model. SOP answers are retrieved directly rather
   than generated.
-- Graph based retrieval.
 - Authentication, access control for multiple users, or deployment
   infrastructure.
-- Docker based reproducibility.
 
 ## Assumptions and Limitations
 
