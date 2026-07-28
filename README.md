@@ -1,66 +1,164 @@
 # Freight Visibility AI Assistant
 
-Local first freight visibility tool for tracking shipments, monitoring delays,
-and surfacing high risk shipments across carriers, lanes, and customers.
-Includes an SOP and FAQ assistant that answers operational questions using
-retrieval over a set of standard operating procedure documents.
+A local, self contained tool for freight operations teams. It brings
+shipment status, delay and risk analytics, relationship context across
+carriers and routes, and standard operating procedure (SOP) guidance into
+a single interface backed by a single API.
 
-## Current capabilities
+## Project summary
 
-- Shipment lookup and event timeline retrieval.
-- Delay rate analytics by carrier and lane.
-- High risk shipment surfacing (delayed, flagged with an exception, or on a
-  lane with a historically high delay rate).
-- SOP and FAQ retrieval over a fixed set of markdown documents using vector
-  search.
-- A rule based assistant router that maps a natural language question to one
-  of the above capabilities (shipment lookup, shipment events, delay
-  analytics, high risk shipments, or SOP search) using keyword matching and
-  shipment ID pattern detection.
-- A Streamlit interface covering all of the above, backed by the FastAPI
-  service.
+Freight operations teams track shipments across many carriers, lanes, and
+customers at once. When a shipment is delayed or flagged with an
+exception, the person resolving it needs fast answers spread across
+several sources: shipment records, event logs, carrier performance data,
+and written SOPs. This project combines three complementary data sources
+behind one assistant so those answers are available from a single
+question:
 
-## Architecture summary
+- **DuckDB** holds the structured shipment, carrier, customer, route,
+  event, and exception facts.
+- **Neo4j** holds the same entities as a graph, so relationship questions
+  (what else is connected to this shipment, what else looks like it, what
+  happened last time) do not require several manual joins.
+- **Chroma** holds the SOP and FAQ documents as searchable text, so
+  procedure guidance for a given disruption can be retrieved directly.
 
-- **Data layer**: synthetic shipment, carrier, customer, route, event, and
-  exception data generated with NumPy and Pandas and loaded into a local
-  DuckDB database file.
-- **API layer**: FastAPI service (`app/api`) exposing shipment, analytics,
-  and assistant endpoints. Reads are served from DuckDB through read only
-  connections.
-- **Retrieval layer**: SOP and FAQ markdown documents are chunked, embedded
-  with a Sentence Transformers model (`all-MiniLM-L6-v2`), and stored in a
-  local Chroma vector store (`app/rag`). Retrieval returns the matching
-  chunks directly rather than generating new text.
-- **Assistant routing**: `app/services/assistant_service.py` uses pattern and
-  keyword matching to route a question to a shipment lookup, an analytics
-  query, or SOP retrieval. Routing is deterministic rather than model
-  driven.
-- **UI layer**: Streamlit app (`app/ui/streamlit_app.py`) that calls the
-  FastAPI service over HTTP.
+All data is synthetic and generated locally with a fixed random seed. The
+assistant router is deterministic rather than model driven: it maps a
+question to a route using keyword and shipment ID pattern matching, and
+SOP answers are retrieved text rather than generated text.
 
-## Python version
+## Key capabilities
 
-Python 3.11
+- **Shipment lookup**: status, route, dates, and the full event timeline
+  for a specific shipment.
+- **Delay and risk analytics**: delay rate and average delay days by
+  carrier and lane, and a surfaced list of high risk shipments (delayed,
+  flagged with an exception, or on a historically high delay lane).
+- **Connected shipment explanation**: a shipment's carrier, customer,
+  route, ordered events, and exception in one answer, using the Neo4j
+  graph.
+- **Similar shipment discovery**: other shipments sharing the same
+  carrier and route.
+- **Exception precedent analysis**: prior shipments with the same
+  exception type on the same carrier or route.
+- **Operating procedure retrieval**: SOP and FAQ text relevant to a
+  question or a confirmed exception type, retrieved from the Chroma
+  vector store.
 
-## Installation
+A Streamlit interface covers all of the above, backed by the FastAPI
+service.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["Streamlit interface"] --> API["FastAPI backend"]
+    API --> Router["Assistant router"]
+    Router --> DuckDB[("DuckDB\nstructured facts")]
+    Router --> Neo4j[("Neo4j\nrelationship analysis")]
+    Router --> Chroma[("Chroma\nprocedure retrieval")]
 ```
 
-No environment variables are required for local use (see `.env.example`).
+- **Streamlit** (`app/ui`) calls the FastAPI service over HTTP and
+  performs no data access or business logic of its own.
+- **FastAPI** (`app/api`) exposes shipment, analytics, and assistant
+  endpoints, delegating each to a service module.
+- **Assistant router** (`app/services/assistant_service.py`) uses
+  keyword and shipment ID pattern matching to route a question to one of
+  nine routes, then calls the corresponding service.
+- **DuckDB** (`app/db`, `app/services/shipment_service.py`) is the source
+  of truth for shipment, carrier, customer, route, event, and exception
+  facts, and confirms a shipment exists before Neo4j or Chroma are
+  called.
+- **Neo4j** (`app/graph`) holds the same entities as a graph for
+  relationship traversal: connected shipment context, peer shipments,
+  and exception precedents. A `/health/graph` endpoint reports its status
+  independently, and the API starts normally when Neo4j is unavailable.
+- **Chroma** (`app/rag`) stores SOP and FAQ documents, chunked and
+  embedded with a Sentence Transformers model, for direct text
+  retrieval.
 
-## Running with Docker
+Full component and data flow details are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-The complete application (FastAPI, Streamlit, and Neo4j) can run with one
+### API endpoints
+
+- `GET /health`
+- `GET /health/graph`
+- `GET /shipments/{shipment_id}`
+- `GET /shipments/{shipment_id}/events`
+- `GET /analytics/delay-rates`
+- `GET /analytics/high-risk-shipments?limit=50`
+- `POST /assistant/sop-search` (request body: `{"question": "..."}`)
+- `POST /assistant/chat` (request body: `{"question": "..."}`)
+
+## Example workflow
+
+**Question:** "Why is SHP-1485 delayed?"
+
+**Route selected:** `graph_shipment_explanation`
+
+**Data sources used:** DuckDB confirms the shipment exists, then Neo4j
+returns its carrier, customer, route, ordered events, and exception.
+
+**Result:** Shipment SHP-1485 shipped from Oakland, CA to New York, NY
+with Canyon Trucking. It is delivered six days late because of a high
+severity customs hold exception detected shortly after pickup. The
+response also includes the four event records for the shipment and the
+resolution status of the exception.
+
+## Verified quality
+
+- 130 automated tests passed (`pytest -q`), 0 failed.
+- A labeled evaluation set of 54 questions, covering all nine assistant
+  routes, reports:
+  - Routing accuracy: 100.0 percent.
+  - Shipment ID extraction accuracy: 100.0 percent.
+  - SOP source hit rate: 100.0 percent, across 10 questions with an
+    expected source document.
+
+These results apply to the synthetic dataset and labeled evaluation
+questions included in this repository, not to real freight data or
+unlabeled questions. Run the evaluation with:
+
+```bash
+python evaluation/evaluate.py
+```
+
+It reports routing accuracy, shipment ID extraction accuracy, SOP source
+hit rate, route confusion counts, and any failed cases, and exits with a
+nonzero status if a result falls below its documented threshold.
+
+## Technology stack
+
+**Backend**
+FastAPI, Uvicorn, Pydantic
+
+**Interface**
+Streamlit
+
+**Data and storage**
+DuckDB, Neo4j (Community Edition), Chroma
+
+**Retrieval**
+Sentence Transformers (`all-MiniLM-L6-v2`)
+
+**Data generation**
+NumPy, Pandas
+
+**Testing**
+Pytest
+
+Python version: 3.11.
+
+## Setup
+
+### Docker (recommended)
+
+Runs the complete application (FastAPI, Streamlit, and Neo4j) with one
 command. Copy `.env.example` to `.env` first and set a real password for
 `NEO4J_PASSWORD`.
-
-Start everything:
 
 ```bash
 docker compose up --build
@@ -89,112 +187,80 @@ Stop everything:
 docker compose down
 ```
 
-This stops and removes the containers but keeps the named volumes, so the
-generated data, Chroma store, and Neo4j graph are still there the next time
-you run `docker compose up --build`.
+This stops and removes the containers but keeps the named volumes, so
+the generated data, Chroma store, and Neo4j graph are still there the
+next time you run `docker compose up --build`.
 
-## Running locally with Python
+### Local Python
 
-Run these steps in order from the project root, with the virtual environment
-activated.
-
-### 1. Generate synthetic data
+Run these steps in order from the project root.
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+No environment variables are required for local use (see
+`.env.example`).
+
+```bash
+# 1. Generate synthetic data (writes CSVs to data/processed/)
 python -m app.data.generate_synthetic_data
-```
 
-Writes `carriers.csv`, `customers.csv`, `routes.csv`, `shipments.csv`,
-`shipment_events.csv`, and `exceptions.csv` to `data/processed/`.
-
-### 2. Build the DuckDB database
-
-```bash
+# 2. Build the DuckDB database (data/processed/logistics.duckdb)
 python -m app.data.load_data
-```
 
-Loads the generated CSVs into `data/processed/logistics.duckdb`.
-
-### 3. Ingest SOP documents into Chroma
-
-```bash
+# 3. Ingest SOP documents into Chroma (data/processed/chroma/)
+# The first run downloads the embedding model from Hugging Face and
+# caches it locally; later runs work offline.
 python -m app.rag.ingest_docs
-```
 
-Chunks the markdown files in `data/sample_sops/`, embeds them with
-`sentence-transformers/all-MiniLM-L6-v2`, and stores them in a local Chroma
-collection under `data/processed/chroma/`. The first run downloads the
-embedding model from Hugging Face and caches it locally; later runs work
-offline.
-
-### 4. Start the FastAPI service
-
-```bash
+# 4. Start the FastAPI service (http://127.0.0.1:8000)
 uvicorn app.api.main:app --reload
-```
 
-Runs on `http://127.0.0.1:8000` by default.
-
-### 5. Start the Streamlit app
-
-In a separate terminal, with the same virtual environment activated:
-
-```bash
+# 5. In a separate terminal, with the same virtual environment active,
+# start the Streamlit app. It expects the FastAPI service to already be
+# running on http://127.0.0.1:8000.
 streamlit run app/ui/streamlit_app.py
 ```
 
-The Streamlit app expects the FastAPI service to be running on
-`http://127.0.0.1:8000`.
+The Neo4j powered graph routes and `/health/graph` require a running
+Neo4j instance; start one with `docker compose up -d neo4j`, then load
+the graph with `python -m app.graph.load_graph`.
 
-## Example API endpoints
+## Repository structure
 
-- `GET /health`
-- `GET /shipments/{shipment_id}`
-- `GET /shipments/{shipment_id}/events`
-- `GET /analytics/delay-rates`
-- `GET /analytics/high-risk-shipments?limit=50`
-- `POST /assistant/sop-search` (request body: `{"question": "..."}`)
-- `POST /assistant/chat` (request body: `{"question": "..."}`)
+```text
+app/
+├── api/          FastAPI app and route modules
+├── services/      shipment, analytics, graph, and assistant routing logic
+├── db/            DuckDB connection helpers
+├── graph/         Neo4j connection, schema, queries, and ingestion
+├── rag/           SOP chunking, embedding, and Chroma retrieval
+├── data/          synthetic data generation and loading
+└── ui/            Streamlit interface
 
-## Retrieval evaluation
+data/
+├── processed/     generated CSVs, DuckDB file, Chroma store (not committed)
+└── sample_sops/   sample SOP and FAQ markdown documents
 
-A labeled question set checks assistant routing and SOP retrieval quality
-against the local database, Neo4j, and Chroma store. Run it with:
-
-```bash
-python evaluation/evaluate.py
+docs/              project documentation
+tests/             automated test suite
+evaluation/        labeled evaluation questions and evaluation script
 ```
 
-It reports:
-
-- Routing accuracy: how often the assistant selects the expected route.
-- Shipment ID extraction accuracy: how often the expected shipment ID is
-  extracted from the question text.
-- SOP source hit rate: for questions with an expected SOP document, how
-  often that document appears in the returned sources.
-- Route confusion counts: for any routing mismatch, the expected route and
-  the route actually chosen.
-- Failed cases: the question, category, and expected versus actual values
-  for anything that did not match.
-
-The script exits with a nonzero status when a result falls below its
-documented threshold. Latest verified run, against the local dev database,
-Neo4j, and Chroma store, over 54 questions:
-
-- Routing accuracy: 100.0% (threshold 95%)
-- Shipment ID extraction accuracy: 100.0% (threshold 95%)
-- SOP source hit rate: 100.0%, 10 questions with an expected source
-  (threshold 85%)
-- Route confusion: none
-- Failed cases: none
-
-## Current limitations
+## Limitations
 
 - All shipment, carrier, customer, and route data is synthetic, generated
-  locally with a fixed random seed. It does not represent real freight data.
-- Assistant routing is deterministic, based on keywords and patterns rather
-  than a model.
-- SOP retrieval returns matching text directly rather than generating a new
-  answer.
-- Generated CSVs, the DuckDB database file, and the Chroma vector store are
-  local build artifacts and are not committed to version control.
+  locally with a fixed random seed. It does not represent real freight
+  data.
+- Assistant routing is deterministic, based on keywords and patterns
+  rather than a model, so questions phrased outside its known patterns
+  may be misrouted.
+- SOP retrieval returns matching source text directly rather than
+  generating a new answer.
+- The system is designed for local, single user use.
+- Generated CSVs, the DuckDB database file, and the Chroma vector store
+  are local build artifacts and are not committed to version control.
