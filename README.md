@@ -202,7 +202,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-No environment variables are required for local use (see
+DuckDB and Chroma features run without environment variables. Neo4j routes require connection settings from .env or the shell environment. (see
 `.env.example`).
 
 ```bash
