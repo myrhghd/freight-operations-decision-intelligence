@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core import config
 import app.data.generate_synthetic_data as data_gen
 import app.data.load_data as data_load
 import app.db.connection as db_connection
@@ -18,6 +19,12 @@ from app.graph.load_graph import run_ingestion
 # Kept separate from the bolt://localhost:7687 development service so graph
 # tests can never modify development graph data.
 GRAPH_TEST_URI = "bolt://localhost:17687"
+
+
+@pytest.fixture(autouse=True)
+def disable_local_llm_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep regression tests independent of the developer's local feature flag."""
+    monkeypatch.setattr(config, "LOCAL_LLM_ENABLED", False)
 
 
 @pytest.fixture(scope="session")

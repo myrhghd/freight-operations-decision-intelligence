@@ -88,7 +88,14 @@ def test_high_risk_shipments_route_shape_unchanged() -> None:
     assert set(response.keys()) == {"question", "route", "answer", "data", "sources"}
 
 
-def test_sop_search_route_shape_unchanged() -> None:
+def test_sop_search_route_shape_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.assistant_service.retrieve_sop_chunks",
+        lambda question, top_k=3: [
+            {"text": "Notify the customer.", "source": "weather_delay_policy.md",
+             "chunk_index": 0, "distance": 0.1}
+        ],
+    )
     response = build_chat_response("What is the weather delay policy?")
     assert response["route"] == "sop_search"
     assert set(response.keys()) == {"question", "route", "answer", "data", "sources"}

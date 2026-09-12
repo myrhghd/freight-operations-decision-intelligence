@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
+from app.core import config
 from app.rag.retriever import extractive_answer_from_chunks, retrieve_sop_chunks
+from app.schemas.local_llm import LLMEvidence, SOPGenerationRequest, SOPGenerationResult
 from app.services.graph_service import (
     get_exception_precedents,
     get_peer_shipments,
@@ -18,6 +21,53 @@ from app.services.shipment_service import (
 
 
 SHIPMENT_ID_PATTERN = re.compile(r"\bSHP-\d{4,}\b", flags=re.IGNORECASE)
+logger = logging.getLogger(__name__)
+MAX_LLM_EVIDENCE_CHUNKS = 3
+MAX_LLM_INPUT_CHARS = 6000
+
+
+def _get_llm_service():
+    from app.services.local_llm_service import OllamaLLMService
+
+    return OllamaLLMService()
+
+
+def _enhance_sop_response(response: dict[str, Any]) -> dict[str, Any]:
+    if not config.LOCAL_LLM_ENABLED:
+        return response
+    try:
+        chunks = response["data"]
+        if not chunks or len(chunks) > MAX_LLM_EVIDENCE_CHUNKS:
+            return response
+        evidence = [
+            LLMEvidence(evidence_id=f"e{index}", source=chunk["source"], text=chunk["text"])
+            for index, chunk in enumerate(chunks, start=1)
+            if isinstance(chunk.get("text"), str) and chunk["text"].strip()
+            and isinstance(chunk.get("source"), str) and chunk["source"].strip()
+        ]
+        if not evidence:
+            return response
+        request = SOPGenerationRequest(question=response["question"], evidence=evidence)
+        # Bound the serialized input without truncating passages or their conditions.
+        if len(request.model_dump_json()) > MAX_LLM_INPUT_CHARS:
+            return response
+        logger.info("SOP LLM enhancement attempted")
+        selection = _get_llm_service().select_sop_evidence(request)
+        # Defend the rendering boundary even if a replacement service is malformed.
+        result = SOPGenerationResult.model_validate(selection.model_dump())
+        by_id = {item.evidence_id: item for item in evidence}
+        selected = [by_id[evidence_id] for evidence_id in result.selected_evidence_ids]
+        enhanced = {
+            **response,
+            "answer": "\n\n".join(item.text for item in selected),
+            "sources": list(dict.fromkeys(item.source for item in selected)),
+        }
+        logger.info("SOP LLM enhancement succeeded")
+        return enhanced
+    except Exception:
+        # Preserve the exact deterministic result and omit payloads/error details.
+        logger.warning("SOP LLM fallback used because generation failed")
+        return response
 
 
 def find_shipment_id(question: str) -> str | None:
@@ -414,10 +464,11 @@ def build_chat_response(question: str) -> dict[str, Any]:
         }
 
     sop_result = extractive_answer_from_chunks(question=question, chunks=chunks)
-    return {
+    response = {
         "question": question,
         "route": route,
         "answer": sop_result.get("answer", ""),
         "data": chunks,
         "sources": sop_result.get("sources", []),
     }
+    return _enhance_sop_response(response)
