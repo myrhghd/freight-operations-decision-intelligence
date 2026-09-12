@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from threading import Lock
 from typing import Any
 
 import chromadb
@@ -11,6 +13,21 @@ from app.rag.ingest_docs import (
     EMBEDDING_MODEL_NAME,
     ingest_documents,
 )
+
+
+_embedding_model_lock = Lock()
+
+
+@lru_cache(maxsize=1)
+def _cached_embedding_model(model_name: str) -> SentenceTransformer:
+    return SentenceTransformer(model_name)
+
+
+def get_embedding_model(model_name: str) -> SentenceTransformer:
+    # Serialize the initial cache miss so concurrent requests do not load
+    # multiple copies of the model into a memory constrained process.
+    with _embedding_model_lock:
+        return _cached_embedding_model(model_name)
 
 
 def get_collection() -> chromadb.api.models.Collection.Collection:
@@ -25,7 +42,7 @@ def retrieve_sop_chunks(question: str, top_k: int = 3) -> list[dict[str, Any]]:
         ingest_documents()
         collection = get_collection()
 
-    model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    model = get_embedding_model(EMBEDDING_MODEL_NAME)
     query_embedding = model.encode([question], show_progress_bar=False).tolist()
 
     results = collection.query(

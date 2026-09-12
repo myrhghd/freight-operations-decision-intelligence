@@ -32,6 +32,18 @@ def _get_llm_service():
     return OllamaLLMService()
 
 
+def _render_sop_selection(
+    response: dict[str, Any], evidence: list[LLMEvidence], result: SOPGenerationResult,
+) -> dict[str, Any]:
+    by_id = {item.evidence_id: item for item in evidence}
+    selected = [by_id[evidence_id] for evidence_id in result.selected_evidence_ids]
+    return {
+        **response,
+        "answer": "\n\n".join(item.text for item in selected),
+        "sources": list(dict.fromkeys(item.source for item in selected)),
+    }
+
+
 def _enhance_sop_response(response: dict[str, Any]) -> dict[str, Any]:
     if not config.LOCAL_LLM_ENABLED:
         return response
@@ -55,13 +67,7 @@ def _enhance_sop_response(response: dict[str, Any]) -> dict[str, Any]:
         selection = _get_llm_service().select_sop_evidence(request)
         # Defend the rendering boundary even if a replacement service is malformed.
         result = SOPGenerationResult.model_validate(selection.model_dump())
-        by_id = {item.evidence_id: item for item in evidence}
-        selected = [by_id[evidence_id] for evidence_id in result.selected_evidence_ids]
-        enhanced = {
-            **response,
-            "answer": "\n\n".join(item.text for item in selected),
-            "sources": list(dict.fromkeys(item.source for item in selected)),
-        }
+        enhanced = _render_sop_selection(response, evidence, result)
         logger.info("SOP LLM enhancement succeeded")
         return enhanced
     except Exception:

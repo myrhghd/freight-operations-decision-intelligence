@@ -60,7 +60,7 @@ def test_llm_defaults(isolated_llm_environment: None) -> None:
         "OLLAMA_HOST": "http://127.0.0.1:11434",
         "OLLAMA_MODEL": "qwen2.5:1.5b",
         "OLLAMA_KEEP_ALIVE": "2m",
-        "OLLAMA_REQUEST_TIMEOUT_SECONDS": 60.0,
+        "OLLAMA_REQUEST_TIMEOUT_SECONDS": 120.0,
     }
 
 

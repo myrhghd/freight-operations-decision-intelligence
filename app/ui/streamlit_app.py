@@ -10,6 +10,9 @@ import streamlit as st
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT_SECONDS = 10
+# A cold local CPU model request can approach two minutes. This applies only
+# to assistant chat; other API calls keep the short default timeout above.
+ASSISTANT_REQUEST_TIMEOUT_SECONDS = 130
 
 HYBRID_ROUTES = {
     "graph_shipment_explanation",
@@ -87,12 +90,16 @@ def call_api(path: str, params: dict[str, Any] | None = None) -> tuple[dict[str,
         return None, "Backend returned a non-JSON response.", response.status_code
 
 
-def call_api_post(path: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None, int | None]:
+def call_api_post(
+    path: str,
+    payload: dict[str, Any],
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None, int | None]:
     try:
         response = requests.post(
             f"{API_BASE_URL}{path}",
             json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except requests.RequestException as exc:
         return None, f"Backend is unavailable. Please ensure the FastAPI server is running. Details: {exc}", None
@@ -496,7 +503,11 @@ def render_assistant_chat() -> None:
         st.info("Enter a question to continue.")
         return
 
-    result, error, _ = call_api_post("/assistant/chat", {"question": question})
+    result, error, _ = call_api_post(
+        "/assistant/chat",
+        {"question": question},
+        timeout=ASSISTANT_REQUEST_TIMEOUT_SECONDS,
+    )
     if error:
         st.error(error)
         return

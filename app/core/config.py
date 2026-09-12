@@ -50,4 +50,4 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "2m")
 # Allow cold model loading and CPU inference. This is an internal transport
 # timeout, independent of Streamlit's HTTP timeout, not an end to end deadline.
-OLLAMA_REQUEST_TIMEOUT_SECONDS = _env_positive_float("OLLAMA_REQUEST_TIMEOUT_SECONDS", 60.0)
+OLLAMA_REQUEST_TIMEOUT_SECONDS = _env_positive_float("OLLAMA_REQUEST_TIMEOUT_SECONDS", 120.0)

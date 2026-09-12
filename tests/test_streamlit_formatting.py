@@ -3,6 +3,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from app.ui.streamlit_app import (
+    ASSISTANT_REQUEST_TIMEOUT_SECONDS,
+    call_api_post,
     carrier_context_rows,
     events_dataframe,
     exception_detail_rows,
@@ -14,6 +16,24 @@ from app.ui.streamlit_app import (
     shipment_summary_rows,
     sop_guidance_text,
 )
+
+
+def test_assistant_timeout_covers_cold_local_inference() -> None:
+    assert ASSISTANT_REQUEST_TIMEOUT_SECONDS == 130
+
+
+@patch("app.ui.streamlit_app.requests.post")
+def test_post_helper_accepts_assistant_timeout(post) -> None:
+    post.return_value.status_code = 200
+    post.return_value.json.return_value = {"status": "ok"}
+    assert call_api_post("/assistant/chat", {"question": "Policy?"}, timeout=130) == (
+        {"status": "ok"}, None, 200
+    )
+    post.assert_called_once_with(
+        "http://127.0.0.1:8000/assistant/chat",
+        json={"question": "Policy?"},
+        timeout=130,
+    )
 
 SHIPMENT = {
     "shipment_id": "SHP-1021",
