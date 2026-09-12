@@ -31,8 +31,9 @@ quickly.
 Provide a local, self contained tool that lets a user look up a shipment,
 understand its status and history, see which shipments and lanes carry
 elevated risk, and retrieve the relevant SOP guidance for a given type of
-disruption. All of this is available from a single interface backed by a
-single API.
+disruption. When enabled, a local Ollama model can synthesize a concise SOP
+answer from retrieved evidence. All of this is available from a single
+interface backed by a single API.
 
 ## Core Use Cases
 
@@ -53,7 +54,8 @@ single API.
 - Gives a consistent, queryable view of delay and risk patterns across
   carriers and lanes.
 - Demonstrates a retrieval based approach to SOP lookup that operates
-  independently of the shipment data model.
+  independently of the shipment data model, with optional local synthesis
+  that preserves deterministic retrieval as the source of truth.
 
 ## Data Entities
 
@@ -78,10 +80,12 @@ single API.
 - A user can retrieve any generated shipment's status and event history.
 - A user can retrieve delay and risk analytics across carriers and lanes.
 - A user can ask a question about an SOP and receive the relevant text and
-  source document.
+  source document. If local LLM mode is enabled, the user may receive a
+  concise synthesized answer grounded in that retrieved evidence.
 - The complete workflow, from data generation through the API and
-  interface, runs locally in a clean environment. The only network
-  requirement is a one time download of the embedding model.
+  interface, runs locally in a clean environment. The required network
+  downloads are the embedding model for SOP retrieval and, when optional
+  local LLM mode is used, the Ollama model `qwen2.5:1.5b`.
 
 ## Scope
 
@@ -89,7 +93,10 @@ single API.
 - A FastAPI backend exposing shipment, analytics, and assistant endpoints.
 - A DuckDB operational database built from the synthetic data.
 - A Chroma vector store over a fixed set of sample SOP documents.
-- A deterministic assistant router that does not generate text.
+- A deterministic assistant router that does not generate routes with a
+  model.
+- Optional local LLM SOP synthesis using Ollama and `qwen2.5:1.5b`, only
+  after Chroma retrieval has produced evidence.
 - A Neo4j graph that holds the same shipment, carrier, customer, route,
   event, and exception data as DuckDB, used for relationship analysis such
   as connected shipment context, peer shipments on the same carrier and
@@ -102,8 +109,9 @@ single API.
 ## Out of Scope
 
 - Real or production freight data.
-- Any generative language model. SOP answers are retrieved directly rather
-  than generated.
+- Model driven routing, autonomous agents, unrestricted tool calling,
+  SQL generation, Cypher generation, or LLM access to DuckDB, Chroma, or
+  Neo4j.
 - Authentication, access control for multiple users, or deployment
   infrastructure.
 
@@ -113,4 +121,10 @@ single API.
   it reflects the rules of the generator rather than real freight patterns.
 - Assistant routing is based on keywords and patterns rather than a model,
   so questions phrased outside its known patterns may be misrouted.
+- Optional local LLM synthesis is limited to SOP responses. Invalid model
+  output, unavailable Ollama, timeouts, disabled configuration, or failed
+  citation validation fall back to the deterministic retrieved answer.
+- Local CPU inference can be slow. Warm SOP synthesis was benchmarked
+  around 20 seconds on the tested Intel Mac; cold requests may take much
+  longer while the model loads and evaluates the prompt.
 - The system is designed for local, single user use.
