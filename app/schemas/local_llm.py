@@ -39,10 +39,11 @@ class SOPGenerationRequest(BaseModel):
 class SOPGenerationResult(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
-    selected_evidence_ids: list[NonEmptyText] = Field(min_length=1)
+    answer: Annotated[NonEmptyText, StringConstraints(max_length=1200)]
+    cited_evidence_ids: list[NonEmptyText] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def unique_selection(self) -> "SOPGenerationResult":
-        if len(self.selected_evidence_ids) != len(set(self.selected_evidence_ids)):
-            raise ValueError("Selected evidence IDs must be unique")
+    def unique_citations(self) -> "SOPGenerationResult":
+        if len(self.cited_evidence_ids) != len(set(self.cited_evidence_ids)):
+            raise ValueError("Cited evidence IDs must be unique")
         return self

@@ -32,15 +32,15 @@ def _get_llm_service():
     return OllamaLLMService()
 
 
-def _render_sop_selection(
+def _render_sop_synthesis(
     response: dict[str, Any], evidence: list[LLMEvidence], result: SOPGenerationResult,
 ) -> dict[str, Any]:
     by_id = {item.evidence_id: item for item in evidence}
-    selected = [by_id[evidence_id] for evidence_id in result.selected_evidence_ids]
+    cited = [by_id[evidence_id] for evidence_id in result.cited_evidence_ids]
     return {
         **response,
-        "answer": "\n\n".join(item.text for item in selected),
-        "sources": list(dict.fromkeys(item.source for item in selected)),
+        "answer": result.answer,
+        "sources": list(dict.fromkeys(item.source for item in cited)),
     }
 
 
@@ -64,10 +64,10 @@ def _enhance_sop_response(response: dict[str, Any]) -> dict[str, Any]:
         if len(request.model_dump_json()) > MAX_LLM_INPUT_CHARS:
             return response
         logger.info("SOP LLM enhancement attempted")
-        selection = _get_llm_service().select_sop_evidence(request)
+        synthesis = _get_llm_service().synthesize_sop_answer(request)
         # Defend the rendering boundary even if a replacement service is malformed.
-        result = SOPGenerationResult.model_validate(selection.model_dump())
-        enhanced = _render_sop_selection(response, evidence, result)
+        result = SOPGenerationResult.model_validate(synthesis.model_dump())
+        enhanced = _render_sop_synthesis(response, evidence, result)
         logger.info("SOP LLM enhancement succeeded")
         return enhanced
     except Exception:

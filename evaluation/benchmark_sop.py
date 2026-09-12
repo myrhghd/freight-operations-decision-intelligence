@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--cold", action="store_true", help="Unload the configured Ollama model first")
     parser.add_argument("--requests", type=int, default=7)
     parser.add_argument("--timeout", type=float, default=180, help="Process-only diagnostic timeout")
+    parser.add_argument("--debug-payload", action="store_true", help="Print Ollama chat payload diagnostics")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.requests < 7 or args.timeout <= 0:
@@ -51,6 +52,22 @@ def main() -> None:
         def wrapper(*positional, **keywords):
             started = perf_counter()
             try:
+                if name == "llm_request" and args.debug_payload:
+                    messages = keywords.get("messages", [])
+                    debug = {
+                        "messages": messages,
+                        "message_count": len(messages),
+                        "roles": [message.get("role") for message in messages],
+                        "message_chars": [
+                            len(str(message.get("content", ""))) for message in messages
+                        ],
+                        "format": keywords.get("format"),
+                        "format_chars": len(json.dumps(keywords.get("format"))),
+                        "options": keywords.get("options"),
+                        "model": keywords.get("model"),
+                        "keep_alive": keywords.get("keep_alive"),
+                    }
+                    print(json.dumps({"llm_payload": debug}, ensure_ascii=False), flush=True)
                 result = function(*positional, **keywords)
                 if name == "llm_request":
                     for field in ("load_duration", "prompt_eval_duration", "eval_duration", "total_duration"):
@@ -73,7 +90,7 @@ def main() -> None:
             (assistant, "extractive_answer_from_chunks", "extractive"),
             (ollama.Client, "__init__", "llm_client_init"),
             (ollama.Client, "chat", "llm_request"),
-            (assistant, "_render_sop_selection", "rendering"),
+            (assistant, "_render_sop_synthesis", "rendering"),
         ):
             stack.enter_context(patch.object(owner, attribute, timed(name, getattr(owner, attribute))))
         for attribute in ("model_validate_json", "model_validate"):
