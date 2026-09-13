@@ -64,8 +64,40 @@ version control and is rebuilt using the loader script.
   collection under `data/processed/chroma/`.
 - `retriever.py` embeds an incoming question with the same model, queries
   the Chroma collection for the closest matching chunks, and returns them
-  with their source document and distance score. It then builds an answer
-  by joining the retrieved chunk text directly, without generating new text.
+  with their source document and distance score. It then builds a
+  deterministic fallback answer by joining the retrieved chunk text
+  directly.
+
+### Optional local SOP synthesis (`app/services/local_llm_service.py`)
+
+When `LOCAL_LLM_ENABLED=true`, SOP search responses can be enhanced by a
+local Ollama model after Chroma retrieval succeeds. The configured model is
+`qwen2.5:1.5b`, accessed through the pinned Python package
+`ollama==0.6.2`. The LLM receives only the user question and the retrieved
+SOP evidence selected by the deterministic retriever. It never queries
+DuckDB, Chroma, or Neo4j directly.
+
+The LLM must return JSON with:
+
+```json
+{
+  "answer": "...",
+  "cited_evidence_ids": ["e1"]
+}
+```
+
+`SOPGenerationResult` validates the response shape, rejects empty answers,
+rejects empty or duplicate citations, rejects extra fields, and rejects
+citations that do not match supplied evidence IDs. If the model is
+disabled, unavailable, times out, returns malformed JSON, omits citations,
+or fails validation, `assistant_service.py` returns the deterministic
+extractive SOP answer unchanged.
+
+This optional LLM path is deliberately narrow. It is not used for
+assistant routing, SQL generation, Cypher generation, shipment lookup,
+analytics, graph retrieval, tool calling, Streamlit logic, or autonomous
+actions. Deterministic retrieval and business logic remain the source of
+truth.
 
 ### Deterministic assistant routing (`app/services/assistant_service.py`)
 
@@ -310,10 +342,21 @@ use.
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=change_this_password
+LOCAL_LLM_ENABLED=false
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:1.5b
+OLLAMA_KEEP_ALIVE=2m
+OLLAMA_REQUEST_TIMEOUT_SECONDS=120
 ```
 
 `.env` is listed in `.gitignore` and is never committed. `.env.example`
-documents the expected keys with placeholder values only.
+documents the expected keys with placeholder values only. Ollama must be
+running separately when local LLM mode is enabled:
+
+```bash
+ollama pull qwen2.5:1.5b
+ollama serve
+```
 
 ### SOP retrieval flow
 
@@ -322,9 +365,15 @@ documents the expected keys with placeholder values only.
 2. `retrieve_sop_chunks` embeds the question and queries Chroma for the
    closest matching chunks (three by default).
 3. `extractive_answer_from_chunks` joins the retrieved chunk text and
-   collects the distinct source document names.
-4. The response includes the combined text, the list of source documents,
-   and the individual chunks (text, source, chunk index, distance).
+   collects the distinct source document names. This is the deterministic
+   fallback answer.
+4. If local LLM mode is disabled, unavailable, or validation fails, the
+   deterministic answer is returned unchanged.
+5. If local LLM mode is enabled and retrieval produced valid SOP evidence,
+   Ollama synthesizes a concise answer from that evidence only. The answer
+   is accepted only when Pydantic validation and citation ID checks pass.
+6. The response keeps the same public keys: `question`, `route`, `answer`,
+   `data`, and `sources`.
 
 ## Current Data Flow
 
@@ -344,6 +393,9 @@ data/sample_sops/*.md --> ingest_docs.py --> Chroma collection
                                                   |
                                                   v
                                        retriever.py <-- FastAPI /assistant routes
+                                                  |
+                                                  v
+                         optional Ollama SOP synthesis (validated JSON + citations)
 
 logistics.duckdb --> load_graph.py --> Neo4j (local, docker compose)
                                                   |
@@ -379,8 +431,9 @@ app/
 │   ├── ingest_docs.py           SOP chunking, embedding, Chroma ingestion
 │   └── retriever.py             embedding based retrieval and extractive answer
 ├── services/
-│   ├── assistant_service.py     deterministic question routing across nine routes
+│   ├── assistant_service.py     deterministic routing, fallback answers, optional SOP LLM invocation
 │   ├── graph_service.py         safe Neo4j wrappers returning (result, error) pairs
+│   ├── local_llm_service.py     optional Ollama SOP synthesis and validation boundary
 │   └── shipment_service.py      shipment and analytics SQL queries
 └── ui/
     └── streamlit_app.py          Streamlit interface

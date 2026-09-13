@@ -1,9 +1,9 @@
-# Freight Visibility AI Assistant
+# Freight Operations Decision Intelligence Platform
 
-A local, self contained tool for freight operations teams. It brings
-shipment status, delay and risk analytics, relationship context across
-carriers and routes, and standard operating procedure (SOP) guidance into
-a single interface backed by a single API.
+A local freight operations decision-support platform that combines
+structured shipment analytics, knowledge-graph retrieval, semantic SOP
+search, and optional grounded LLM synthesis behind a FastAPI backend and
+Streamlit interface.
 
 ## Project summary
 
@@ -24,16 +24,40 @@ question:
   procedure guidance for a given disruption can be retrieved directly.
 
 All data is synthetic and generated locally with a fixed random seed. The
-assistant router is deterministic rather than model driven: it maps a
-question to a route using keyword and shipment ID pattern matching, and
-SOP answers are retrieved text rather than generated text.
+assistant router is deterministic rather than model-driven: it maps a
+question to a route using keyword and shipment ID pattern matching. SOP
+answers are grounded in Chroma retrieval first; an optional local Ollama
+model (`qwen2.5:1.5b`) can synthesize a concise answer from the retrieved
+SOP evidence. Deterministic routing, retrieval, validation, and business
+logic remain the source of truth; the model does not perform routing,
+SQL, Cypher, graph retrieval, or autonomous actions.
+
+## What this project demonstrates
+
+- **Generative AI with guardrails**: optional grounded local LLM synthesis
+  for SOP responses, validated before it reaches the UI.
+- **Retrieval-augmented generation**: Chroma vector retrieval with
+  Sentence Transformers supplies the SOP evidence before generation.
+- **Knowledge graph integration**: Neo4j supports connected shipment
+  context, peer shipments, and exception precedent analysis.
+- **API engineering**: FastAPI endpoints expose shipment lookup,
+  analytics, SOP search, and assistant chat through stable response
+  contracts.
+- **Local and private inference**: Ollama runs `qwen2.5:1.5b` locally
+  when optional synthesis is enabled.
+- **Reliability by design**: deterministic fallback and citation
+  validation keep retrieved evidence as the source of truth.
+- **Testing and benchmarking**: automated tests cover routing, retrieval,
+  graph behavior, API responses, LLM fallback, and local performance.
+- **Operational UI**: Streamlit presents shipment workflows, analytics,
+  graph context, and grounded SOP guidance.
 
 ## Key capabilities
 
 - **Shipment lookup**: status, route, dates, and the full event timeline
   for a specific shipment.
 - **Delay and risk analytics**: delay rate and average delay days by
-  carrier and lane, and a surfaced list of high risk shipments (delayed,
+  carrier and lane, and a surfaced list of high-risk shipments (delayed,
   flagged with an exception, or on a historically high delay lane).
 - **Connected shipment explanation**: a shipment's carrier, customer,
   route, ordered events, and exception in one answer, using the Neo4j
@@ -45,6 +69,10 @@ SOP answers are retrieved text rather than generated text.
 - **Operating procedure retrieval**: SOP and FAQ text relevant to a
   question or a confirmed exception type, retrieved from the Chroma
   vector store.
+- **Optional local SOP synthesis**: when enabled, Ollama with
+  `qwen2.5:1.5b` can rewrite retrieved SOP evidence into a short,
+  cited natural language answer. Invalid output falls back to the
+  deterministic retrieved answer.
 
 A Streamlit interface covers all of the above, backed by the FastAPI
 service.
@@ -54,10 +82,16 @@ service.
 ```mermaid
 flowchart LR
     UI["Streamlit interface"] --> API["FastAPI backend"]
-    API --> Router["Assistant router"]
+    API --> Router["Deterministic assistant router"]
     Router --> DuckDB[("DuckDB\nstructured facts")]
     Router --> Neo4j[("Neo4j\nrelationship analysis")]
-    Router --> Chroma[("Chroma\nprocedure retrieval")]
+    Router --> Chroma[("Chroma\nSOP retrieval")]
+    Chroma --> Evidence["Retrieved SOP evidence"]
+    Evidence --> Fallback["Deterministic fallback response"]
+    Evidence --> LLM["Optional Ollama/Qwen synthesis"]
+    LLM --> Validation["Pydantic + citation validation"]
+    Validation --> Grounded["Grounded SOP response"]
+    Validation --> Fallback
 ```
 
 - **Streamlit** (`app/ui`) calls the FastAPI service over HTTP and
@@ -78,6 +112,10 @@ flowchart LR
 - **Chroma** (`app/rag`) stores SOP and FAQ documents, chunked and
   embedded with a Sentence Transformers model, for direct text
   retrieval.
+- **Optional local LLM** (`app/services/local_llm_service.py`) is used
+  only after deterministic SOP retrieval succeeds. It never performs
+  routing, SQL, Cypher, graph retrieval, shipment lookup, analytics, tool
+  calling, or autonomous actions.
 
 Full component and data flow details are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -110,7 +148,7 @@ resolution status of the exception.
 
 ## Verified quality
 
-- 130 automated tests passed (`pytest -q`), 0 failed.
+- 172 automated tests passed in the validated regression suite, with 0 failures.
 - A labeled evaluation set of 54 questions, covering all nine assistant
   routes, reports:
   - Routing accuracy: 100.0 percent.
@@ -142,7 +180,10 @@ Streamlit
 DuckDB, Neo4j (Community Edition), Chroma
 
 **Retrieval**
-Sentence Transformers (`all-MiniLM-L6-v2`)
+Sentence Transformers (`all-MiniLM-L6-v2`), Chroma
+
+**Optional local LLM**
+Ollama, `qwen2.5:1.5b`, Python package `ollama==0.6.2`
 
 **Data generation**
 NumPy, Pandas
@@ -164,7 +205,7 @@ command. Copy `.env.example` to `.env` first and set a real password for
 docker compose up --build
 ```
 
-This starts Neo4j, waits for it to become healthy, then runs a one time
+This starts Neo4j, waits for it to become healthy, then runs a one-time
 setup step that generates synthetic data, builds the DuckDB database,
 ingests the SOP documents into Chroma, and loads the Neo4j graph, before
 starting the API and the Streamlit UI.
@@ -226,9 +267,62 @@ uvicorn app.api.main:app --reload
 streamlit run app/ui/streamlit_app.py
 ```
 
-The Neo4j powered graph routes and `/health/graph` require a running
+The Neo4j-powered graph routes and `/health/graph` require a running
 Neo4j instance; start one with `docker compose up -d neo4j`, then load
 the graph with `python -m app.graph.load_graph`.
+
+### Optional local LLM mode
+
+Local LLM mode is off by default. When `LOCAL_LLM_ENABLED=true`, the
+assistant still routes deterministically and still retrieves SOP chunks
+from Chroma with Sentence Transformers first. After successful SOP
+retrieval, the API may call Ollama to synthesize a concise answer from
+only those retrieved chunks. The model response must include cited
+evidence IDs, and every cited ID must match the supplied evidence. Empty,
+malformed, uncited, unknown, timed out, or unavailable model output is
+discarded and the deterministic extractive SOP answer is returned.
+
+Install and run Ollama locally, then pull the configured model:
+
+```bash
+ollama pull qwen2.5:1.5b
+ollama serve
+```
+
+In another terminal, enable the mode through `.env` or your shell:
+
+```bash
+LOCAL_LLM_ENABLED=true
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:1.5b
+OLLAMA_KEEP_ALIVE=2m
+OLLAMA_REQUEST_TIMEOUT_SECONDS=120
+```
+
+Set `LOCAL_LLM_ENABLED=false` or remove the variable to return to fully
+deterministic SOP responses. The LLM is not used for routing, SQL,
+Cypher, shipment lookup, analytics, graph retrieval, Streamlit logic, or
+autonomous actions.
+
+Local CPU inference can be slow. On the tested Intel Mac, cold requests
+were much slower while the model loaded and evaluated the prompt; warm
+production-shaped SOP synthesis benchmarked around 20 seconds. The
+standard Streamlit/API requests keep the short default timeout, while
+`/assistant/chat` uses a dedicated longer timeout to allow local LLM
+inference and deterministic fallback. A slow local model can still make
+assistant responses take noticeably longer than warm deterministic
+requests.
+
+Suggested demo flow:
+
+1. Run the app with `LOCAL_LLM_ENABLED=false` and ask
+   "What is the customer notification policy?" to show retrieved SOP
+   evidence.
+2. Start Ollama, set `LOCAL_LLM_ENABLED=true`, restart the API, and ask
+   the same question to show grounded synthesis with the same source
+   document.
+3. Stop Ollama or disable the flag and ask again to demonstrate fallback
+   to the deterministic SOP answer.
 
 ## Repository structure
 
@@ -259,8 +353,9 @@ evaluation/        labeled evaluation questions and evaluation script
 - Assistant routing is deterministic, based on keywords and patterns
   rather than a model, so questions phrased outside its known patterns
   may be misrouted.
-- SOP retrieval returns matching source text directly rather than
-  generating a new answer.
-- The system is designed for local, single user use.
+- Optional LLM synthesis applies only to successful SOP search responses.
+  It is grounded in retrieved Chroma evidence and validated citations,
+  but it can be slow on local CPU inference.
+- The system is designed for local, single-user use.
 - Generated CSVs, the DuckDB database file, and the Chroma vector store
   are local build artifacts and are not committed to version control.

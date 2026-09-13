@@ -10,6 +10,9 @@ import streamlit as st
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT_SECONDS = 10
+# A cold local CPU model request can approach two minutes. This applies only
+# to assistant chat; other API calls keep the short default timeout above.
+ASSISTANT_REQUEST_TIMEOUT_SECONDS = 130
 
 HYBRID_ROUTES = {
     "graph_shipment_explanation",
@@ -87,12 +90,16 @@ def call_api(path: str, params: dict[str, Any] | None = None) -> tuple[dict[str,
         return None, "Backend returned a non-JSON response.", response.status_code
 
 
-def call_api_post(path: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None, int | None]:
+def call_api_post(
+    path: str,
+    payload: dict[str, Any],
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
+) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None, int | None]:
     try:
         response = requests.post(
             f"{API_BASE_URL}{path}",
             json=payload,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except requests.RequestException as exc:
         return None, f"Backend is unavailable. Please ensure the FastAPI server is running. Details: {exc}", None
@@ -223,29 +230,95 @@ def retrieval_sources_label(retrieval_sources: list[str] | None) -> str:
     return ", ".join(retrieval_sources)
 
 
-def render_home() -> None:
-    st.title("Freight Visibility AI Assistant")
-    st.write(
-        "Local-first visibility for shipment tracking, delay monitoring, and risk detection "
-        "across carriers, lanes, and customers."
+def render_sources(sources: Any) -> None:
+    """Render response sources when the API returns them."""
+    if isinstance(sources, list) and sources:
+        st.subheader("Sources")
+        for source in sources:
+            st.write(f"- {source}")
+
+
+def render_retrieved_evidence(data: Any) -> None:
+    """Keep raw assistant evidence available without making it the default view."""
+    with st.expander("Retrieved evidence", expanded=False):
+        if isinstance(data, list):
+            if data:
+                st.dataframe(pd.DataFrame(data), width="stretch", hide_index=True)
+            else:
+                st.write("No data returned.")
+        elif isinstance(data, dict):
+            st.json(data)
+        else:
+            st.write("No data returned.")
+
+
+def apply_page_style() -> None:
+    """Keep presentation consistent while respecting the active Streamlit theme."""
+    st.markdown(
+        """
+        <style>
+        .block-container {max-width: 1280px; padding-top: 2.5rem; padding-bottom: 3rem;}
+        h1, h2, h3 {letter-spacing: -0.025em;}
+        [data-testid="stMetric"] {
+            background: var(--secondary-background-color);
+            border: 1px solid rgba(128,128,128,.2);
+            border-radius: 12px; padding: 1rem 1.2rem;
+        }
+        [data-testid="stMetricValue"] {font-size: 1.65rem;}
+        [data-testid="stSidebar"] {border-right: 1px solid rgba(128,128,128,.2);}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-    health_data, error, _ = call_api("/health")
-    st.subheader("Backend Status")
-    if error:
-        st.error(error)
-        return
 
-    if isinstance(health_data, dict):
+def navigate_to(page: str) -> None:
+    st.session_state["navigation"] = page
+
+
+def render_home() -> None:
+    st.caption("FREIGHT VISIBILITY / OPERATIONS WORKSPACE")
+    st.title("Every shipment. A clearer picture.")
+    st.write(
+        "Track freight, investigate delays, and find the guidance to take the next step."
+    )
+    st.caption("Portfolio demonstration • Synthetic shipment data • Local-first architecture")
+
+    health_data, error, _ = call_api("/health")
+    if error:
+        st.error("The backend is unavailable. Start the FastAPI service to load shipment data.")
+        with st.expander("Connection details"):
+            st.write(error)
+    elif isinstance(health_data, dict):
         if health_data.get("status") == "ok":
-            st.success(f"{health_data.get('service', 'service')} is healthy.")
+            st.success("Connected · Shipment services are ready.")
         else:
-            st.warning("Backend responded but did not report healthy status.")
-        st.json(health_data)
+            st.warning("Connected, but the backend did not report a healthy status.")
+        with st.expander("Service details"):
+            st.json(health_data)
+
+    st.subheader("Start with your next decision")
+    cards = [
+        ("Track a shipment", "Check status, delivery dates, and the latest shipment events.", "Shipment Lookup"),
+        ("Investigate risk", "Review shipments flagged for delays, exceptions, or elevated risk.", "High-Risk Shipments"),
+        ("Ask the assistant", "Explore shipment context and source-backed operating guidance.", "Assistant Chat"),
+    ]
+    for column, (title, description, destination) in zip(st.columns(3), cards):
+        with column:
+            with st.container(border=True):
+                st.subheader(title)
+                st.write(description)
+                st.button("Open " + destination, key="open_" + destination,
+                          width="stretch", on_click=navigate_to, args=(destination,))
+    st.divider()
+    st.subheader("Explore the demo")
+    st.write("Start with **SHP-1001** in Shipment Lookup, then inspect its events or ask the assistant for context.")
+    st.caption("Use Delay Analytics to compare carriers and lanes, or SOP Assistant to search operating procedures.")
 
 
 def render_shipment_lookup() -> None:
     st.header("Shipment Lookup")
+    st.caption("Delivery status and shipment details in one place.")
     shipment_id = st.text_input("Shipment ID", value="SHP-1001").strip()
 
     if not shipment_id:
@@ -264,16 +337,17 @@ def render_shipment_lookup() -> None:
         st.subheader("Shipment Summary")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Status", str(shipment.get("shipment_status", "")))
-        col2.metric("Mode", str(shipment.get("shipment_mode", "")))
+        col2.metric("Transport Mode", str(shipment.get("shipment_mode", "")))
         col3.metric("Delayed", "Yes" if shipment.get("is_delayed") else "No")
         col4.metric("Delay Days", int(shipment.get("delay_days", 0)))
 
         st.subheader("Shipment Details")
-        st.dataframe(pd.DataFrame([shipment]), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(_field_value_rows(shipment)), width="stretch", hide_index=True)
 
 
 def render_shipment_events() -> None:
     st.header("Shipment Events")
+    st.caption("Follow the recorded milestones for a shipment.")
     shipment_id = st.text_input("Shipment ID", value="SHP-1001", key="events_shipment_id").strip()
 
     if not shipment_id:
@@ -293,11 +367,12 @@ def render_shipment_events() -> None:
         if events_df.empty:
             st.info("No events found for this shipment.")
             return
-        st.dataframe(events_df, width="stretch", hide_index=True)
+        st.dataframe(_rename_to_labels(events_df), width="stretch", hide_index=True)
 
 
 def render_delay_analytics() -> None:
     st.header("Delay Analytics")
+    st.caption("Compare delay patterns across carriers and lanes.")
     data, error, _ = call_api("/analytics/delay-rates")
     if error:
         st.error(error)
@@ -312,7 +387,12 @@ def render_delay_analytics() -> None:
         st.info("No analytics data available.")
         return
 
-    st.dataframe(df, width="stretch", hide_index=True)
+    total = int(df["total_shipments"].sum())
+    delayed = int(df["delayed_shipments"].sum())
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Shipments analyzed", f"{total:,}")
+    col2.metric("Delayed shipments", f"{delayed:,}")
+    col3.metric("Overall delay rate", f"{delayed / total:.1%}" if total else "—")
 
     st.subheader("Top Delay Rates by Carrier")
     carrier_delay = (
@@ -322,7 +402,11 @@ def render_delay_analytics() -> None:
         .head(10)
         .set_index("carrier_name")
     )
-    st.bar_chart(carrier_delay)
+    st.caption("Mean delay rate across each carrier's lane groups; each group has equal weight.")
+    st.bar_chart(carrier_delay.rename(columns={"delay_rate": "Delay rate"}))
+    st.subheader("Carrier and lane breakdown")
+    st.dataframe(_rename_to_labels(df), width="stretch", hide_index=True,
+                 column_config={"Delay Rate": st.column_config.NumberColumn(format="percent")})
 
 
 def highlight_risk_flags(row: pd.Series) -> list[str]:
@@ -341,7 +425,8 @@ def highlight_risk_flags(row: pd.Series) -> list[str]:
 
 def render_high_risk_shipments() -> None:
     st.header("High-Risk Shipments")
-    limit = st.number_input("Limit", min_value=1, max_value=500, value=50, step=1)
+    st.caption("Prioritize shipments with delays, exceptions, or elevated carrier and route risk.")
+    limit = st.number_input("Maximum shipments to show", min_value=1, max_value=500, value=50, step=1)
     data, error, _ = call_api("/analytics/high-risk-shipments", params={"limit": int(limit)})
     if error:
         st.error(error)
@@ -356,12 +441,15 @@ def render_high_risk_shipments() -> None:
         st.info("No high-risk shipments returned.")
         return
 
-    styled = df.style.apply(highlight_risk_flags, axis=1)
+    st.caption(f"Showing {len(df):,} shipments · Red highlights delays; amber highlights exceptions.")
+    styled = df.style.apply(highlight_risk_flags, axis=1).format(precision=2)
+    styled = styled.relabel_index([field_label(c) for c in df.columns], axis=1)
     st.dataframe(styled, width="stretch", hide_index=True)
 
 
 def render_sop_assistant() -> None:
     st.header("SOP Assistant")
+    st.caption("Search operating procedures and review the supporting sources.")
     question = st.text_input(
         "Ask an SOP/FAQ question",
         value="What is the SOP for customs delay escalation?",
@@ -386,12 +474,8 @@ def render_sop_assistant() -> None:
     st.subheader("Answer")
     st.write(answer if answer else "No answer returned.")
 
-    st.subheader("Sources")
-    if isinstance(sources, list) and sources:
-        for source in sources:
-            st.write(f"- {source}")
-    else:
-        st.write("No sources returned.")
+    render_sources(sources)
+    render_retrieved_evidence(result.get("data"))
 
 
 def render_hybrid_response(result: dict[str, Any]) -> None:
@@ -482,10 +566,12 @@ def render_hybrid_response(result: dict[str, Any]) -> None:
 
     st.subheader("Retrieval Sources")
     st.write(retrieval_sources_label(result.get("retrieval_sources")))
+    render_retrieved_evidence(data)
 
 
 def render_assistant_chat() -> None:
     st.header("Assistant Chat")
+    st.caption("Ask about a shipment, delay patterns, or operating procedures. Include a shipment ID for shipment-specific questions.")
     question = st.text_input(
         "Ask a logistics question",
         value="Where is shipment SHP-1001?",
@@ -496,7 +582,11 @@ def render_assistant_chat() -> None:
         st.info("Enter a question to continue.")
         return
 
-    result, error, _ = call_api_post("/assistant/chat", {"question": question})
+    result, error, _ = call_api_post(
+        "/assistant/chat",
+        {"question": question},
+        timeout=ASSISTANT_REQUEST_TIMEOUT_SECONDS,
+    )
     if error:
         st.error(error)
         return
@@ -508,36 +598,21 @@ def render_assistant_chat() -> None:
     route = str(result.get("route", "unknown"))
     answer = str(result.get("answer", "")).strip()
 
-    st.subheader("Route")
-    st.code(route)
+    with st.expander("How this answer was routed"):
+        st.code(route)
 
     st.subheader("Answer")
     st.write(answer if answer else "No answer returned.")
+
+    sources = result.get("sources", [])
+    render_sources(sources)
 
     if route in HYBRID_ROUTES:
         render_hybrid_response(result)
         return
 
     data = result.get("data")
-    sources = result.get("sources", [])
-
-    st.subheader("Data")
-    if isinstance(data, list):
-        if data:
-            st.dataframe(pd.DataFrame(data), width="stretch", hide_index=True)
-        else:
-            st.write("No data returned.")
-    elif isinstance(data, dict):
-        st.dataframe(pd.DataFrame([data]), width="stretch", hide_index=True)
-    else:
-        st.write("No data returned.")
-
-    st.subheader("Sources")
-    if isinstance(sources, list) and sources:
-        for source in sources:
-            st.write(f"- {source}")
-    else:
-        st.write("No sources returned.")
+    render_retrieved_evidence(data)
 
 
 def main() -> None:
@@ -547,7 +622,9 @@ def main() -> None:
         layout="wide",
     )
 
-    st.sidebar.title("Navigation")
+    apply_page_style()
+    st.sidebar.title("Freight Visibility")
+    st.sidebar.caption("Shipment intelligence workspace")
     page = st.sidebar.radio(
         "Go to",
         [
@@ -559,7 +636,11 @@ def main() -> None:
             "SOP Assistant",
             "Assistant Chat",
         ],
+        key="navigation",
     )
+    st.sidebar.divider()
+    st.sidebar.caption("DEMO ENVIRONMENT")
+    st.sidebar.caption("Synthetic data · Local-first\n\nShipment tracking, risk analysis, and grounded guidance.")
 
     if page == "Home":
         render_home()
